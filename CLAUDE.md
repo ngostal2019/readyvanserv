@@ -81,22 +81,24 @@ CONFIRMED: all image files are JPEG, so all `src` references use `.jpg` (includi
   submission code looks the way it does.
 - Removed the "Call Us" button/`tel:` link site-wide per client request (2026-07-18) —
   text and email/form are now the only contact methods.
+- FormSubmit email confirmed/activated and swapped to its random hex token in the form
+  `action` (2026-07-18) — the raw `readyvanservicesquotes@yahoo.com` address no longer
+  appears in `index.html`'s form markup (still used in the JSON-LD schema/meta description,
+  which is fine/expected).
+- Fixed quote form submission on iOS Safari (2026-07-18) — see "Contact section" below.
 
 ## Next steps (in order)
 1. ~~Add the real image files to `images/`~~ Done.
 2. ~~`git init` / push to GitHub / enable Pages~~ Done.
 3. ~~Add custom domain + DNS~~ Done — `www.readyvanservices.com` is live with HTTPS.
-4. **Swap the FormSubmit email for its random hex token**: FormSubmit recommends replacing
-   the plain `action="https://formsubmit.co/readyvanservicesquotes@yahoo.com"` in
-   `index.html` (the `<form id="quoteForm">` tag) with `https://formsubmit.co/<hex-token>`,
-   to stop the raw email being scrapeable from page source (anyone with the raw URL could
-   otherwise POST arbitrary spam to it from elsewhere). The hex token is emailed to
-   `readyvanservicesquotes@yahoo.com` when that address is confirmed/activated with
-   FormSubmit — not yet done as of 2026-07-18.
-5. Do one real end-to-end test submission (text + photo) on the **live custom domain** as
-   `readyvanservicesquotes@yahoo.com` and click FormSubmit's activation link when it
-   arrives — required once before real customer submissions will deliver. Check spam;
-   Yahoo has been slow/aggressive filtering FormSubmit mail during testing.
+4. ~~Swap the FormSubmit email for its random hex token~~ Done 2026-07-18 — the form's
+   `action` in `index.html` now points at `https://formsubmit.co/<hex-token>` instead of
+   the raw email (email confirmed/activated with FormSubmit in the process).
+5. ~~iOS Safari submission fix~~ Done 2026-07-18 — photos now compress at file-select time
+   instead of at submit time so the popup-window submit stays synchronous with the tap (see
+   "Contact section" below). **Still needs a real end-to-end retest on an iPhone once this
+   fix reaches the live site** (see hosting/repo note — it was fixed in `ngostal2019/readyvanserv`
+   but not yet copied to `readyvanservices/readyvanservices.github.io`).
 6. Optional: apex domain (`readyvanservices.com`, no `www`) currently doesn't resolve —
    add 4 `A` records at Namecheap (`@` → `185.199.108.153/.109.153/.110.153/.111.153`) if
    the client wants the bare domain to work too (GitHub auto-redirects it to `www`).
@@ -113,8 +115,10 @@ link ("Contact") and every other page CTA point at `#contact`.
 
 ### Quote form submission — why it's built the way it is
 The quote-request form (name, phone, email, pickup address, pickup date, photo upload) submits
-to **FormSubmit.co**, target `readyvanservicesquotes@yahoo.com` (form `action` attribute on
-`<form id="quoteForm">`), forwarded as an email — no backend needed since this is a static site.
+to **FormSubmit.co** (form `action` attribute on `<form id="quoteForm">` — as of 2026-07-18
+this is FormSubmit's random hex token, not the raw email, per their anti-scraping
+recommendation; it still delivers to `readyvanservicesquotes@yahoo.com`), forwarded as an
+email — no backend needed since this is a static site.
 Photos are resized/compressed in-browser via `<canvas>` before upload to stay under FormSubmit's
 10MB combined attachment cap (silent — no user-facing "photos are compressed" text, per client
 request).
@@ -153,9 +157,20 @@ limitations discovered 2026-07-17/18 — don't "simplify" it back without re-tes
   delivery, to *any* recipient) — this was NOT a code bug, confirmed by testing from the real
   deployed domain instead, which delivered immediately. If future debugging sees "success" but
   no email again, suspect this before touching the code, and try a different network/domain.
-- FormSubmit recommends replacing the plain email in `action=` with a random hex token they
-  email you on activation, so the raw address isn't scrapeable from page source — see "Next
-  steps" above; not yet done as of 2026-07-18.
+- ~~FormSubmit recommends replacing the plain email in `action=` with a random hex token~~
+  Done 2026-07-18.
+- **iOS Safari left the popup window permanently blank** (fixed 2026-07-18): the desktop-tested
+  version above compressed photos inside the submit handler (async, via canvas `toBlob`), then
+  navigated the popup afterward. Desktop browsers tolerate that gap; iOS Safari does not — it
+  only honors the delayed `form.target`-based navigation into the pre-opened popup if it happens
+  (near-)synchronously with the original tap. The fix: `startCompressingSelectedPhotos()` kicks
+  off compression in the background as soon as photos are picked (on the file input's `change`
+  event), caching results in `compressedPhotoCache` (a `Map` keyed by the original `File`
+  object). The submit handler is now fully synchronous — it just reads whatever's already in
+  the cache (falling back to the uncompressed original file if someone submits within a second
+  of picking photos, before background compression finishes), so `window.open()` and the actual
+  `HTMLFormElement.prototype.submit.call(form)` happen in the same tick as the tap, no `Promise`
+  chain in between. Don't reintroduce async work inside the submit handler itself.
 
 Form UX notes:
 - The native `<input type="file" id="qf-photos" name="photos">` is visually hidden; a styled
