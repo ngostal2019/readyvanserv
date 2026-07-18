@@ -235,7 +235,7 @@
       <div id="choiceFormPanel" class="contact-panel" hidden role="tabpanel">
         <p class="form-required-note"><span class="required-mark" aria-hidden="true">*</span> Required field</p>
 
-        <form id="quoteForm" class="quote-form" action="https://formsubmit.co/readyvanservicesquotes@yahoo.com" method="POST" enctype="multipart/form-data" novalidate>
+        <form id="quoteForm" class="quote-form" action="https://formsubmit.co/8888d7de7e95eebc600668749c59d12e" method="POST" enctype="multipart/form-data" novalidate>
           <input type="hidden" name="_subject" value="New Quote Request — Ready Van Services Website" />
           <input type="hidden" name="_template" value="table" />
           <input type="hidden" name="_captcha" value="false" />
@@ -467,6 +467,7 @@
       var photosBtn = document.getElementById('qfPhotosBtn');
       var photoPreviews = document.getElementById('qfPhotoPreviews');
       var MAX_PHOTOS = 6;
+      var compressedPhotoCache = new Map();
 
       var requiredFields = [
         { input: document.getElementById('qf-name'), error: document.getElementById('qf-name-error'), messages: { valueMissing: 'Please enter your name.' } },
@@ -548,6 +549,7 @@
       function resetQuoteForm() {
         form.reset();
         if (photoPreviews) photoPreviews.innerHTML = '';
+        compressedPhotoCache.clear();
         requiredFields.forEach(function (field) {
           field.input.classList.remove('invalid');
           field.error.textContent = '';
@@ -595,6 +597,7 @@
           } else {
             setStatus('', false);
             renderPhotoPreviews();
+            startCompressingSelectedPhotos();
           }
         });
       }
@@ -642,27 +645,42 @@
         });
       }
 
+      // Compress photos as soon as they're picked, not at submit time. iOS Safari only
+      // honors a form submit into the popup window opened on click if that submit happens
+      // (near-)synchronously with the tap; waiting on async compression at submit time made
+      // the popup navigation arrive too late and Safari left it permanently blank.
+      function startCompressingSelectedPhotos() {
+        var files = photosField.files ? Array.prototype.slice.call(photosField.files) : [];
+        files.forEach(function (file) {
+          if (compressedPhotoCache.has(file)) return;
+          compressImage(file, 1600, 0.72).then(function (compressed) {
+            compressedPhotoCache.set(file, compressed);
+          });
+        });
+      }
+
       var QF_POPUP_NAME = 'qfSubmitWindow';
 
       form.addEventListener('submit', function (e) {
         e.preventDefault();
         if (!validateForm()) return;
 
-        // Open the target window synchronously, inside the click gesture, so the browser's
-        // popup blocker doesn't kill it once we navigate it later from inside a Promise
-        // (FormSubmit's AJAX endpoint doesn't deliver file attachments, and a hidden iframe
-        // gets silently ignored, so a real, visible top-level submit is what actually works).
+        // Everything below has to run synchronously in the same tick as the tap: iOS Safari
+        // only accepts window.open() *and* the later form-submit-into-that-window as a valid
+        // user gesture if there's no async gap between them (see startCompressingSelectedPhotos
+        // above for why compression already happened earlier, at file-select time).
         var popup = window.open('about:blank', QF_POPUP_NAME);
 
         submitBtn.disabled = true;
         submitBtn.textContent = 'Sending…';
         setStatus('', false);
 
-        var files = photosField ? Array.prototype.slice.call(photosField.files) : [];
+        try {
+          var files = photosField ? Array.prototype.slice.call(photosField.files) : [];
+          var compressedFiles = files.map(function (file) {
+            return compressedPhotoCache.get(file) || file;
+          });
 
-        Promise.all(files.map(function (file) {
-          return compressImage(file, 1600, 0.72);
-        })).then(function (compressedFiles) {
           // FormSubmit's own docs demonstrate attachments as a field named "attachment"
           // rather than our UI's "photos" field, and describe multiple files as multiple
           // separate file input fields rather than one multi-file input — so build the
@@ -701,12 +719,12 @@
 
           resetQuoteForm();
           showFlash();
-        }).catch(function () {
+        } catch (err) {
           setStatus('Something went wrong sending your request. Please try again, or text us a photo directly instead.', true);
           submitBtn.disabled = false;
           submitBtn.textContent = 'Request My Free Quote';
           if (popup && !popup.closed) popup.close();
-        });
+        }
       });
     })();
   </script>
